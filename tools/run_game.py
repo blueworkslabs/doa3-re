@@ -155,8 +155,8 @@ def launcher_settings():
                 "RECOMP_D3D_MSAA": str(int(settings.get("msaa", 1))),
                 "RECOMP_D3D_ANISO": str(int(settings.get("anisotropy", 1))),
                 "RECOMP_MOVIE_FIT": "original" if settings.get("movie_fit") == "original" else "fill",
-                "RECOMP_D3D_ALPHA_COVERAGE": str(settings.get("alpha_coverage", "raw")),
-                "RECOMP_D3D_SHARP_2D": "1" if settings.get("sharp_2d") else "0",
+                "RECOMP_D3D_ALPHA_COVERAGE": str(settings.get("alpha_coverage", "sharp")),
+                "RECOMP_D3D_SHARP_2D": "1" if settings.get("sharp_2d", True) else "0",
                 "RECOMP_D3D_WIDESCREEN": "0" if screen == "4:3" else str(screen),
                 "RECOMP_AUDIO_GAIN": f"{int(settings.get('volume', 100)) / 100:.4f}",
                 "RECOMP_FREE_CAMERA": "1" if settings.get("free_camera") else "0"}

@@ -946,20 +946,20 @@ float drawAnisotropy()
     return value;
 }
 
-/* RECOMP_D3D_ALPHA_COVERAGE: how MSAA treats alpha-tested draws. "sharp"
-   gives an opaque cutout a one-pixel coverage ramp at the game's threshold
-   and leaves blended or inverted tests to the plain cutoff; "off" keeps the
-   plain cutoff everywhere; unset or anything else takes coverage from the
-   raw alpha. */
+/* RECOMP_D3D_ALPHA_COVERAGE: how MSAA treats alpha-tested draws. Unset or
+   "sharp" gives an opaque cutout a one-pixel coverage ramp at the game's
+   threshold and leaves blended or inverted tests to the plain cutoff; "raw"
+   takes coverage from the raw alpha, which dithers blended layers; "off"
+   keeps the plain cutoff everywhere. */
 enum class AlphaCoverage { Raw, Sharp, Off };
 
 AlphaCoverage alphaCoverageMode()
 {
     static const AlphaCoverage mode = [] {
         const char *text = std::getenv("RECOMP_D3D_ALPHA_COVERAGE");
-        if (text != nullptr && std::strcmp(text, "sharp") == 0) return AlphaCoverage::Sharp;
+        if (text != nullptr && std::strcmp(text, "raw") == 0) return AlphaCoverage::Raw;
         if (text != nullptr && std::strcmp(text, "off") == 0) return AlphaCoverage::Off;
-        return AlphaCoverage::Raw;
+        return AlphaCoverage::Sharp;
     }();
     return mode;
 }
@@ -984,7 +984,7 @@ bool usesAlphaCoverage(const RecompD3dPresenterDrawCommand &draw, SDL_GPUSampleC
     }
 }
 
-/* RECOMP_D3D_SHARP_2D=1: screen-space sprites drawn near the 2D layer's own
+/* RECOMP_D3D_SHARP_2D, on unless 0: screen-space sprites drawn near the 2D layer's own
    scale sample sharp bilinear, each texel filling whole pixels and blending
    only across the pixel at its border. Sprites the game stretches further and
    the movies keep the plain bilinear filter. */
@@ -992,7 +992,7 @@ bool sharp2d()
 {
     static const bool value = [] {
         const char *text = std::getenv("RECOMP_D3D_SHARP_2D");
-        return text != nullptr && std::atoi(text) != 0;
+        return text == nullptr || std::atoi(text) != 0;
     }();
     return value;
 }
