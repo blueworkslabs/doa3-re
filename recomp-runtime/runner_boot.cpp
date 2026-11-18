@@ -144,6 +144,18 @@ void setDoa3WidescreenShape(float aspect)
     const float fov_16x9 = read(DOA3(0x001ed85cu, 0x00251a74u, 0x002523b4u));
     const float wide = (framing - 4.0f / 3.0f) / (16.0f / 9.0f - 4.0f / 3.0f);
     write(DOA3(0x001ed85cu, 0x00251a74u, 0x002523b4u), fov_4x3 + (fov_16x9 - fov_4x3) * wide);
+#ifdef RECOMP_DOA3_EUR_BINDINGS
+    /* The character select draws its face tiles from sprites 0x2D0-0x2E1 at
+       widescreen: 80 texels wide in a 60-pixel tile, squeezed for a
+       television that stretches the picture. Its 4:3 sprites 0x2E2-0x2F3
+       crop each face 60 wide, centred per character. The 2D layer stays 4:3
+       here, so give the widescreen sprites the 4:3 rectangles. */
+    enum : std::uint32_t { SPRITE_RECORDS = 0x003052f8u, FACE_WIDE = 0x2d0u, FACE_4X3 = 0x2e2u, FACES = 18u };
+    for (std::uint32_t i = 0u; i < FACES; ++i) {
+        std::memcpy(recomp_memory(SPRITE_RECORDS + 12u * (FACE_WIDE + i), 8u),
+            recomp_memory(SPRITE_RECORDS + 12u * (FACE_4X3 + i), 8u), 8u);
+    }
+#endif
 }
 
 /* The shape reaches guest RAM (video flags, camera constants), so online both
