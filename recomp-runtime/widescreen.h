@@ -42,6 +42,19 @@ static inline bool recomp_squeeze_widescreen_2d(float left, float right, float w
     return left > width / 8.0f + 1.0f || right < width * 7.0f / 8.0f - 1.0f;
 }
 
+/* RECOMP_MOVIE_FIT: "original" shows each movie's whole 4:3 frame at full
+   height with bars at the sides; unset or "fill" fills the screen's width,
+   cropping above and below. Read once per presenter translation unit. */
+static inline bool recomp_movie_original(void)
+{
+    static int original = -1;
+    if (original < 0) {
+        const char *value = getenv("RECOMP_MOVIE_FIT");
+        original = value != NULL && strcmp(value, "original") == 0;
+    }
+    return original != 0;
+}
+
 typedef struct RecompWidescreen2dScale {
     float x, y;
 } RecompWidescreen2dScale;
@@ -51,9 +64,11 @@ typedef struct RecompWidescreen2dScale {
    layer narrows to 4:3 of the screen's shape (3/4 at 16:9, 5/6 at 16:10).
    Movies arrive in a centered 4:3 frame the game sized for 16:9, at least as
    tall as the screen: 540x480 guest pixels around 4:3 film, or a taller
-   zoomed frame around letterboxed 16:9 film. The frame keeps its shape at
-   full height, except that the zoomed frame shrinks to full width on a
-   screen narrower than 16:9. Fades and backdrops keep their geometry. */
+   zoomed frame around letterboxed 16:9 film. By default (fill) the 4:3 frame
+   grows to the screen's width and the zoomed frame keeps the game's zoom,
+   shrinking to full width on a screen narrower than 16:9. With
+   RECOMP_MOVIE_FIT=original either frame shows whole at full height, as on a
+   4:3 television. Fades and backdrops keep their geometry. */
 static inline RecompWidescreen2dScale recomp_widescreen_2d_scale(float width, float height,
     unsigned aspect_w, unsigned aspect_h, float left, float right, float top, float bottom)
 {
@@ -63,10 +78,19 @@ static inline RecompWidescreen2dScale recomp_widescreen_2d_scale(float width, fl
 
     if (fabsf(left + right - width) <= 2.0f && bottom - top >= height - 2.0f &&
         fabsf(right - left - frame * (bottom - top)) <= 0.01f * (right - left)) {
-        if (bottom - top > height + 2.0f && wide > 1.0f) {
+        const bool zoomed = bottom - top > height + 2.0f;
+        if (recomp_movie_original()) {
+            /* the whole frame at full height, kept 4:3 on the screen */
+            scale.y = height / (bottom - top);
+            scale.x = wide * scale.y;
+        } else if (zoomed && wide > 1.0f) {
             scale.y = 1.0f / wide;
-        } else {
+        } else if (zoomed) {
             scale.x = wide;
+        } else {
+            /* 4:3 film: 0.75 * wide of the screen's width at full height */
+            scale.y = 1.0f / (0.75f * wide);
+            scale.x = wide * scale.y;
         }
     } else if (recomp_squeeze_widescreen_2d(left, right, width)) {
         scale.x = 0.75f * wide;
