@@ -3861,12 +3861,6 @@ RecompD3dPresenterError recomp_d3d_presenter_submit(
                     bottom = std::max(bottom, xy[1]);
                 }
                 const auto scale = widescreen2dScale(presenter, left, right, top, bottom);
-                if (draw.has_texture && layout.texcoord_offset != RECOMP_D3D_FVF_ABSENT &&
-                    recomp_squeeze_widescreen_2d(left, right, static_cast<float>(presenter->config.width))) {
-                    recomp_widescreen_unsqueeze_quad(vdata.data() + v_offset, draw.vertex_stride,
-                        draw.vertex_count, layout.texcoord_offset,
-                        static_cast<float>(draw.texture.width), static_cast<float>(draw.texture.height));
-                }
                 constants[12] += constants[0] * 0.5f * (1.0f - scale.x) * presenter->config.width;
                 constants[0] *= scale.x;
                 constants[13] += constants[5] * 0.5f * (1.0f - scale.y) * presenter->config.height;
