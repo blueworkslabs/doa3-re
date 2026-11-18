@@ -26,7 +26,7 @@ constexpr int kWidth = 640, kHeight = 400;
 constexpr float kTopH = 30, kSide = 20, kFadeY = 230;
 constexpr float kInfoY = 262, kLabelY = 296, kValueY = 310, kValueH = 16, kTabY = 362, kTabH = 12;
 
-const int kHeights[] = {480, 720, 1080, 1440, 2160};
+const int kHeights[] = {480, 720, 800, 1080, 1440, 2160}; // 800: the Steam Deck's own screen
 const int kSamples[] = {1, 2, 4, 8};
 const char *const kScreens[] = {"4:3", "16:9", "16:10", "ULTRAWIDE"};
 const int kVolumes[] = {100, 75, 50, 25, 0};
@@ -673,6 +673,7 @@ int main(int argc, char **argv)
     // A plain exit keeps an untouched saved ultrawide; play saves what the row shows.
     const Settings loaded = settings;
     const int shown_screen = launcher.choice[WIDESCREEN];
+    const int shown_height = launcher.choice[RESOLUTION];
 
     int result = -1;
     int held_dx = 0, held_dy = 0;
@@ -798,6 +799,8 @@ int main(int argc, char **argv)
         settings.anisotropy = kAnisotropy[launcher.choice[ANISOTROPY]];
         settings.movie_fit = launcher.choice[MOVIE_FIT] ? "original" : "fill";
         if (result != 0 && launcher.choice[WIDESCREEN] == shown_screen) settings.screen = loaded.screen;
+        // A saved height the list lacks stays unless the player picked another.
+        if (launcher.choice[RESOLUTION] == shown_height && loaded.height > 0) settings.height = loaded.height;
         if (!saveSettings(settings_path, settings)) {
             std::fprintf(stderr, "launcher: cannot write %s\n", settings_path.c_str());
             if (result == 0) result = 1;
