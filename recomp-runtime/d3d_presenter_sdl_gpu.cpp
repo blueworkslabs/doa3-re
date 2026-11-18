@@ -927,6 +927,18 @@ SDL_GPUTexture *lookupDepthTarget(
     return new_dt;
 }
 
+/* RECOMP_D3D_ANISO: anisotropic filtering for the game's textures, 2-16;
+   unset, 0 or 1 keeps the plain trilinear filter. */
+float drawAnisotropy()
+{
+    static const float value = [] {
+        const char *text = std::getenv("RECOMP_D3D_ANISO");
+        const int requested = text != nullptr ? std::atoi(text) : 1;
+        return static_cast<float>(std::clamp(requested, 1, 16));
+    }();
+    return value;
+}
+
 SDL_GPUSampler *lookupDrawSampler(RecompD3dPresenter *presenter, uint32_t address_u, uint32_t address_v)
 {
     uint32_t u = address_u <= 5u ? address_u : 1u;
@@ -942,7 +954,8 @@ SDL_GPUSampler *lookupDrawSampler(RecompD3dPresenter *presenter, uint32_t addres
     desc.address_mode_u = hostAddressMode(u);
     desc.address_mode_v = hostAddressMode(v);
     desc.address_mode_w = SDL_GPU_SAMPLERADDRESSMODE_REPEAT;
-    desc.enable_anisotropy = false;
+    desc.max_anisotropy = drawAnisotropy();
+    desc.enable_anisotropy = desc.max_anisotropy > 1.0f;
     desc.max_lod = 1000.0f;  // the zero default would sample only the base mip level
     presenter->address_samplers[u][v] = SDL_CreateGPUSampler(presenter->device, &desc);
     return presenter->address_samplers[u][v] ? presenter->address_samplers[u][v] : presenter->filter_sampler;

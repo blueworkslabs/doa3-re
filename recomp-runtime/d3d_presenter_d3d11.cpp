@@ -2028,6 +2028,15 @@ bool ensureSharedDrawState(RecompD3dPresenter *presenter)
        wrap addressing is the common case for this title's textures. */
     D3D11_SAMPLER_DESC sampler_desc{};
     sampler_desc.Filter = D3D11_FILTER_MIN_MAG_MIP_LINEAR;
+    /* RECOMP_D3D_ANISO: anisotropic filtering, 2-16; the address variants copy
+       this description. Unset, 0 or 1 keeps trilinear. */
+    if (const char *aniso = std::getenv("RECOMP_D3D_ANISO")) {
+        const int requested = std::clamp(std::atoi(aniso), 1, 16);
+        if (requested > 1) {
+            sampler_desc.Filter = D3D11_FILTER_ANISOTROPIC;
+            sampler_desc.MaxAnisotropy = static_cast<UINT>(requested);
+        }
+    }
     sampler_desc.AddressU = D3D11_TEXTURE_ADDRESS_WRAP;
     sampler_desc.AddressV = D3D11_TEXTURE_ADDRESS_WRAP;
     sampler_desc.AddressW = D3D11_TEXTURE_ADDRESS_WRAP;
