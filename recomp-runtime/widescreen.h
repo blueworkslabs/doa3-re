@@ -69,15 +69,21 @@ typedef struct RecompWidescreen2dScale {
    shrinking to full width on a screen narrower than 16:9. With
    RECOMP_MOVIE_FIT=original either frame shows whole at full height, as on a
    4:3 television. Fades and backdrops keep their geometry. */
+static inline bool recomp_widescreen_film(float width, float height,
+    float left, float right, float top, float bottom)
+{
+    const float frame = 0.75f * width / height; /* a 4:3 frame in 16:9 guest units */
+    return fabsf(left + right - width) <= 2.0f && bottom - top >= height - 2.0f &&
+        fabsf(right - left - frame * (bottom - top)) <= 0.01f * (right - left);
+}
+
 static inline RecompWidescreen2dScale recomp_widescreen_2d_scale(float width, float height,
     unsigned aspect_w, unsigned aspect_h, float left, float right, float top, float bottom)
 {
     const float wide = 16.0f * aspect_h / (9.0f * aspect_w);
-    const float frame = 0.75f * width / height; /* a 4:3 frame in 16:9 guest units */
     RecompWidescreen2dScale scale = {1.0f, 1.0f};
 
-    if (fabsf(left + right - width) <= 2.0f && bottom - top >= height - 2.0f &&
-        fabsf(right - left - frame * (bottom - top)) <= 0.01f * (right - left)) {
+    if (recomp_widescreen_film(width, height, left, right, top, bottom)) {
         const bool zoomed = bottom - top > height + 2.0f;
         if (recomp_movie_original()) {
             /* the whole frame at full height, kept 4:3 on the screen */

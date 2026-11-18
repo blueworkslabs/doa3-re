@@ -68,6 +68,8 @@ struct Settings {
     bool movies = true;        // the build installs the disc's movies (3.4 GB)
     int anisotropy = 1;        // RECOMP_D3D_ANISO
     std::string movie_fit = "fill"; // RECOMP_MOVIE_FIT: fill the width or keep the 4:3 frame
+    std::string alpha_coverage = "raw"; // RECOMP_D3D_ALPHA_COVERAGE; kept, not shown
+    bool sharp_2d = false;     // RECOMP_D3D_SHARP_2D; kept, not shown
 };
 
 struct Color { Uint8 r, g, b; };
@@ -107,6 +109,9 @@ Settings loadSettings(const std::string &path)
     if (jsonValue(text, "movies", value)) settings.movies = value != "false";
     if (jsonValue(text, "anisotropy", value)) settings.anisotropy = std::atoi(value.c_str());
     if (jsonValue(text, "movie_fit", value) && value == "\"original\"") settings.movie_fit = "original";
+    if (jsonValue(text, "alpha_coverage", value) && (value == "\"sharp\"" || value == "\"off\""))
+        settings.alpha_coverage = value.substr(1, value.size() - 2);
+    if (jsonValue(text, "sharp_2d", value)) settings.sharp_2d = value == "true";
     return settings;
 }
 
@@ -122,6 +127,8 @@ bool saveSettings(const std::string &path, const Settings &settings)
          << ",\n  \"movies\": " << (settings.movies ? "true" : "false")
          << ",\n  \"anisotropy\": " << settings.anisotropy
          << ",\n  \"movie_fit\": \"" << settings.movie_fit << '"'
+         << ",\n  \"alpha_coverage\": \"" << settings.alpha_coverage << '"'
+         << ",\n  \"sharp_2d\": " << (settings.sharp_2d ? "true" : "false")
          << ",\n  \"check_updates\": " << (settings.check_updates ? "true" : "false") << "\n}\n";
     return static_cast<bool>(file);
 }

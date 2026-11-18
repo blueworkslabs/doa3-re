@@ -946,6 +946,57 @@ float drawAnisotropy()
     return value;
 }
 
+/* RECOMP_D3D_ALPHA_COVERAGE: how MSAA treats alpha-tested draws. "sharp"
+   gives an opaque cutout a one-pixel coverage ramp at the game's threshold
+   and leaves blended or inverted tests to the plain cutoff; "off" keeps the
+   plain cutoff everywhere; unset or anything else takes coverage from the
+   raw alpha. */
+enum class AlphaCoverage { Raw, Sharp, Off };
+
+AlphaCoverage alphaCoverageMode()
+{
+    static const AlphaCoverage mode = [] {
+        const char *text = std::getenv("RECOMP_D3D_ALPHA_COVERAGE");
+        if (text != nullptr && std::strcmp(text, "sharp") == 0) return AlphaCoverage::Sharp;
+        if (text != nullptr && std::strcmp(text, "off") == 0) return AlphaCoverage::Off;
+        return AlphaCoverage::Raw;
+    }();
+    return mode;
+}
+
+bool sharpAlphaCoverage(const RecompD3dPresenterDrawCommand &draw)
+{
+    return alphaCoverageMode() == AlphaCoverage::Sharp && !draw.blend.blend_enable &&
+        (draw.depth.alpha_func == RECOMP_D3D_COMPARE_GREATER ||
+         draw.depth.alpha_func == RECOMP_D3D_COMPARE_GREATER_EQUAL);
+}
+
+bool usesAlphaCoverage(const RecompD3dPresenterDrawCommand &draw, SDL_GPUSampleCount sample_count)
+{
+    // Modern water's alpha is its opacity, already blended; coverage would thin it twice.
+    if (sample_count == SDL_GPU_SAMPLECOUNT_1 || !draw.depth.alpha_test_enable || draw.water.enabled) {
+        return false;
+    }
+    switch (alphaCoverageMode()) {
+    case AlphaCoverage::Off: return false;
+    case AlphaCoverage::Sharp: return sharpAlphaCoverage(draw);
+    default: return true;
+    }
+}
+
+/* RECOMP_D3D_SHARP_2D=1: screen-space sprites drawn near the 2D layer's own
+   scale sample sharp bilinear, each texel filling whole pixels and blending
+   only across the pixel at its border. Sprites the game stretches further and
+   the movies keep the plain bilinear filter. */
+bool sharp2d()
+{
+    static const bool value = [] {
+        const char *text = std::getenv("RECOMP_D3D_SHARP_2D");
+        return text != nullptr && std::atoi(text) != 0;
+    }();
+    return value;
+}
+
 SDL_GPUSampler *lookupDrawSampler(RecompD3dPresenter *presenter, uint32_t address_u, uint32_t address_v)
 {
     uint32_t u = address_u <= 5u ? address_u : 1u;
@@ -1520,8 +1571,17 @@ std::string buildMslShader(const RecompD3dVertexLayout &layout, uint32_t fvf,
     s += "    if (u.blend_flags.y == 1.0) {\n";
     s += "        shaded = u.texture_factor;\n";
     s += "    } else if (u.draw_flags.x > 0.5) {\n";
-    s += "        float4 sampled = guest_texture.sample(guest_sampler,\n";
-    s += "            clamp(in.texcoord, u.texcoord_clamp.xy, u.texcoord_clamp.zw) * u.texture_flags.xy);\n";
+    s += "        float2 uv = clamp(in.texcoord, u.texcoord_clamp.xy, u.texcoord_clamp.zw) * u.texture_flags.xy;\n";
+    s += "        float4 sampled;\n";
+    // Sharp bilinear (RECOMP_D3D_SHARP_2D) up to fog_params.w pixels per texel.
+    s += "        if (u.fog_params.w > 0.0) {\n";
+    s += "            float2 size = float2(guest_texture.get_width(), guest_texture.get_height()), t = uv * size - 0.5;\n";
+    s += "            float2 ppt = 1.0 / max(fwidth(t), float2(1e-6)), f = fract(t);\n";
+    s += "            float2 on = step(1.0, ppt) * step(ppt, float2(u.fog_params.w));\n";
+    s += "            f = mix(f, saturate((f - 0.5) * ppt + 0.5), on);\n";
+    s += "            sampled = guest_texture.sample(guest_sampler, (floor(t) + f + 0.5) / size,\n";
+    s += "                gradient2d(dfdx(uv), dfdy(uv)));\n";
+    s += "        } else sampled = guest_texture.sample(guest_sampler, uv);\n";
     s += "        if (u.lighting_flags.y > 0.5) sampled.rgb = float3(1.0);\n";
     s += has_diffuse ? "        shaded *= sampled;\n" : "        shaded = sampled;\n";
     // Stage 0 combines the texture and lit diffuse as the guest's color and alpha ops select.
@@ -1559,7 +1619,12 @@ std::string buildMslShader(const RecompD3dVertexLayout &layout, uint32_t fvf,
     s += "            (func == 4 && alpha > ref) ||\n";
     s += "            (func == 5 && alpha != ref) ||\n";
     s += "            (func == 6 && alpha >= ref);\n";
-    s += "        if (!alpha_pass) discard_fragment();\n";
+    // Sharp coverage: a one-pixel ramp across the threshold becomes the sample mask.
+    s += "        if (u.draw_flags.y > 1.5) {\n";
+    s += "            float a = saturate(shaded.a) * 255.0, fw = fwidth(a);\n";
+    s += "            shaded.a = saturate((a - ref) / max(fw, 0.0001) + 0.5);\n";
+    s += "            if (shaded.a <= 0.0 || (fw < 0.0001 && !alpha_pass)) discard_fragment();\n";
+    s += "        } else if (!alpha_pass) discard_fragment();\n";
     s += "    }\n";
     s += "    if (u.water_sun.w > 0.5) {\n";
     s += "        bool sea = u.water_sun.w > 1.5, film = u.water_sun.w > 2.5 && u.water_sun.w < 3.5;\n";
@@ -2070,8 +2135,16 @@ std::string buildGlslFragmentShader(const RecompD3dVertexLayout &layout, uint32_
     s += "    if (u.blend_flags.y == 1.0) {\n";
     s += "        shaded = u.texture_factor;\n";
     s += "    } else if (u.draw_flags.x > 0.5) {\n";
-    s += "        vec4 sampled = texture(guest_texture,\n";
-    s += "            clamp(tc, u.texcoord_clamp.xy, u.texcoord_clamp.zw) * u.texture_flags.xy);\n";
+    s += "        vec2 uv = clamp(tc, u.texcoord_clamp.xy, u.texcoord_clamp.zw) * u.texture_flags.xy;\n";
+    s += "        vec4 sampled;\n";
+    // Sharp bilinear (RECOMP_D3D_SHARP_2D) up to fog_params.w pixels per texel.
+    s += "        if (u.fog_params.w > 0.0) {\n";
+    s += "            vec2 size = vec2(textureSize(guest_texture, 0)), t = uv * size - 0.5;\n";
+    s += "            vec2 ppt = 1.0 / max(fwidth(t), vec2(1e-6)), f = fract(t);\n";
+    s += "            vec2 on = step(1.0, ppt) * step(ppt, vec2(u.fog_params.w));\n";
+    s += "            f = mix(f, clamp((f - 0.5) * ppt + 0.5, 0.0, 1.0), on);\n";
+    s += "            sampled = textureGrad(guest_texture, (floor(t) + f + 0.5) / size, dFdx(uv), dFdy(uv));\n";
+    s += "        } else sampled = texture(guest_texture, uv);\n";
     s += "        if (u.lighting_flags.y > 0.5) sampled.rgb = vec3(1.0);\n";
     s += has_diffuse ? "        shaded *= sampled;\n" : "        shaded = sampled;\n";
     // Stage 0 combines the texture and lit diffuse as the guest's color and alpha ops select.
@@ -2108,7 +2181,12 @@ std::string buildGlslFragmentShader(const RecompD3dVertexLayout &layout, uint32_
     s += "            (func == 4 && alpha > ref) ||\n";
     s += "            (func == 5 && alpha != ref) ||\n";
     s += "            (func == 6 && alpha >= ref);\n";
-    s += "        if (!alpha_pass) discard;\n";
+    // Sharp coverage: a one-pixel ramp across the threshold becomes the sample mask.
+    s += "        if (u.draw_flags.y > 1.5) {\n";
+    s += "            float a = clamp(shaded.a, 0.0, 1.0) * 255.0, fw = fwidth(a);\n";
+    s += "            shaded.a = clamp((a - ref) / max(fw, 0.0001) + 0.5, 0.0, 1.0);\n";
+    s += "            if (shaded.a <= 0.0 || (fw < 0.0001 && !alpha_pass)) discard;\n";
+    s += "        } else if (!alpha_pass) discard;\n";
     s += "    }\n";
     s += "    if (u.water_sun.w > 0.5) {\n";
     s += "        bool sea = u.water_sun.w > 1.5, film = u.water_sun.w > 2.5 && u.water_sun.w < 3.5;\n";
@@ -2504,9 +2582,7 @@ SDL_GPUGraphicsPipeline *getOrCreatePipeline(RecompD3dPresenter *presenter,
     pkey.color_format = color_fmt;
     pkey.depth_format = depth_fmt;
     pkey.sample_count = sample_count;
-    // Modern water's alpha is its opacity, already blended; coverage would thin it twice.
-    pkey.alpha_to_coverage = sample_count != SDL_GPU_SAMPLECOUNT_1 && draw.depth.alpha_test_enable &&
-        !draw.water.enabled;
+    pkey.alpha_to_coverage = usesAlphaCoverage(draw, sample_count);
 
     pkey.depth_test_enable = draw.depth.depth_test_enable;
     pkey.depth_write_enable = draw.depth.depth_write_enable;
@@ -3843,6 +3919,7 @@ RecompD3dPresenterError recomp_d3d_presenter_submit(
         std::memcpy(constants, draw.transform, sizeof(draw.transform));
         std::memcpy(constants + 16, draw.blend_transforms, sizeof(draw.blend_transforms));
 
+        bool film = false;
         if (layout.pretransformed || draw.program_count) {
             std::memset(constants, 0, sizeof(draw.transform));
             const float guest_w = draw.target.offscreen ? target_w : static_cast<float>(presenter->config.width);
@@ -3868,6 +3945,8 @@ RecompD3dPresenterError recomp_d3d_presenter_submit(
                     bottom = std::max(bottom, xy[1]);
                 }
                 const auto scale = widescreen2dScale(presenter, left, right, top, bottom);
+                film = recomp_widescreen_film(static_cast<float>(presenter->config.width),
+                    static_cast<float>(presenter->config.height), left, right, top, bottom);
                 if (recomp_widescreen_face_tiles_4x3() && draw.has_texture &&
                     layout.texcoord_offset != RECOMP_D3D_FVF_ABSENT &&
                     recomp_squeeze_widescreen_2d(left, right, static_cast<float>(presenter->config.width))) {
@@ -3949,9 +4028,18 @@ RecompD3dPresenterError recomp_d3d_presenter_submit(
         recomp_d3d_quad_texcoord_clamp(draw.vertex_bytes, draw.vertex_stride,
             layout.pretransformed ? draw.vertex_count : 0u, layout.texcoord_offset,
             constants + kHeaderUniformFloats - 4u);
+        /* fog_params.w: the sharp 2D filter's limit in pixels per texel, a
+           little above the main target's scale over the guest's. */
+        if (sharp2d() && layout.pretransformed && is_main && texture != nullptr && !film &&
+            mainHeight(presenter) > presenter->config.height) {
+            constants[kHeaderUniformFloats - 9u] =
+                1.3f * mainHeight(presenter) / static_cast<float>(presenter->config.height);
+        }
 
         constants[64] = (texture != nullptr) ? 1.0f : 0.0f;
-        constants[65] = draw.depth.alpha_test_enable ? 1.0f : 0.0f;
+        // 2 selects the sharp coverage ramp for a draw whose pipeline takes coverage.
+        constants[65] = !draw.depth.alpha_test_enable ? 0.0f
+            : (sharpAlphaCoverage(draw) && usesAlphaCoverage(draw, pass_samples)) ? 2.0f : 1.0f;
         constants[66] = static_cast<float>(draw.depth.alpha_func);
         constants[67] = static_cast<float>(draw.depth.alpha_ref);
         constants[68] = (draw.blend_weight_count != 0u) ? 1.0f : 0.0f;
