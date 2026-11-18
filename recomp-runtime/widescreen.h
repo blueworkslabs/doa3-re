@@ -98,4 +98,56 @@ static inline RecompWidescreen2dScale recomp_widescreen_2d_scale(float width, fl
     return scale;
 }
 
+/* At widescreen the game pre-squeezes the character select's face tiles for
+   a television that stretches the picture: each is drawn 3/4 as wide as its
+   sprite, from the tile's left edge. Europe's boot gives those sprites their
+   4:3 crops (runner_boot.cpp), so a tile samples 60 texels into 45 pixels.
+   The 2D layer stays 4:3 here, so for a screen-space quad whose texels per
+   pixel are 4/3 across and 1 down, move its right edge out to one pixel per
+   texel, as the 4:3 tile is drawn. vertices is the presenter's own copy;
+   true if it changed them. */
+/* Set by Europe's boot once the face sprites carry their 4:3 crops; Japan and
+   USA keep the game's own widescreen tiles. */
+static inline bool recomp_widescreen_face_tiles_4x3(void)
+{
+    static int set = -1;
+    if (set < 0) set = getenv("RECOMP_D3D_FACE_TILES_4X3") != NULL;
+    return set != 0;
+}
+
+static inline bool recomp_widescreen_unsqueeze_quad(unsigned char *vertices, unsigned stride,
+    unsigned count, unsigned uv_offset, float texture_w, float texture_h)
+{
+    float x0 = INFINITY, x1 = -INFINITY, y0 = INFINITY, y1 = -INFINITY;
+    float u0 = INFINITY, u1 = -INFINITY, v0 = INFINITY, v1 = -INFINITY;
+    unsigned i;
+
+    if (count != 4u || texture_w <= 0.0f || texture_h <= 0.0f || uv_offset + 8u > stride) return false;
+    for (i = 0u; i < count; ++i) {
+        float xy[2], uv[2];
+        memcpy(xy, vertices + i * stride, sizeof xy);
+        memcpy(uv, vertices + i * stride + uv_offset, sizeof uv);
+        x0 = fminf(x0, xy[0]); x1 = fmaxf(x1, xy[0]);
+        y0 = fminf(y0, xy[1]); y1 = fmaxf(y1, xy[1]);
+        u0 = fminf(u0, uv[0]); u1 = fmaxf(u1, uv[0]);
+        v0 = fminf(v0, uv[1]); v1 = fmaxf(v1, uv[1]);
+    }
+    if (!(x1 - x0 >= 8.0f) || !(y1 - y0 >= 8.0f) ||
+        fabsf((u1 - u0) * texture_w - (x1 - x0) * 4.0f / 3.0f) > 0.5f ||
+        fabsf((v1 - v0) * texture_h - (y1 - y0)) > 0.5f) {
+        return false;
+    }
+    {
+        const float right = x0 + (u1 - u0) * texture_w;
+        for (i = 0u; i < count; ++i) {
+            float x;
+            memcpy(&x, vertices + i * stride, sizeof x);
+            if (x > x0 + 0.5f * (x1 - x0)) {
+                memcpy(vertices + i * stride, &right, sizeof right);
+            }
+        }
+    }
+    return true;
+}
+
 #endif

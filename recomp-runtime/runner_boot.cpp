@@ -155,6 +155,13 @@ void setDoa3WidescreenShape(float aspect)
         std::memcpy(recomp_memory(SPRITE_RECORDS + 12u * (FACE_WIDE + i), 8u),
             recomp_memory(SPRITE_RECORDS + 12u * (FACE_4X3 + i), 8u), 8u);
     }
+    /* The game still draws them 3/4 as wide; the presenters widen them back
+       (widescreen.h). */
+#ifdef _WIN32
+    _putenv_s("RECOMP_D3D_FACE_TILES_4X3", "1");
+#else
+    setenv("RECOMP_D3D_FACE_TILES_4X3", "1", 1);
+#endif
 #endif
 }
 
