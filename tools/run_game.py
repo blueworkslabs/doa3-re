@@ -188,6 +188,11 @@ def main():
     env.pop("RECOMP_WATCHDOG_MS", None)
     for name, value in launcher_settings().items():
         env.setdefault(name, value)
+    # Steam's overlay, recording and Steam Input follow an X11 window; on a
+    # Wayland desktop SDL would open a native one they cannot reach.
+    if (sys.platform.startswith("linux") and (env.get("SteamGameId") or env.get("SteamAppId"))
+            and env.get("WAYLAND_DISPLAY") and env.get("DISPLAY") and "SDL_VIDEO_DRIVER" not in env):
+        env["SDL_VIDEO_DRIVER"] = "x11"
     try:
         keymap = keyboard_map()
     except ValueError as error:

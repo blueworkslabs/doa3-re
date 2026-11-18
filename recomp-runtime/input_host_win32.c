@@ -261,9 +261,47 @@ static bool opens_first(SDL_JoystickID a, SDL_JoystickID b)
     return false;
 }
 
+/* Until port 0's pad has pressed START or A, the first other pad to press
+   either takes port 0 and port 0's moves to its port: a pad that reads but
+   never reports (a duplicate, or one whose input goes elsewhere) cannot hold
+   player 1. RECOMP_INPUT_CLAIM=0 keeps the opening order. */
+static bool claimed[RECOMP_INPUT_PORT_COUNT];
+
+static bool claims(SDL_Gamepad *pad)
+{
+    return SDL_GetGamepadButton(pad, SDL_GAMEPAD_BUTTON_START) ||
+        SDL_GetGamepadButton(pad, SDL_GAMEPAD_BUTTON_SOUTH);
+}
+
+static void claim_port0(void)
+{
+    static int enabled = -1;
+    if (enabled < 0) {
+        const char *value = getenv("RECOMP_INPUT_CLAIM");
+        enabled = value == NULL || strcmp(value, "0") != 0;
+    }
+    if (!enabled || claimed[0]) return;
+    if (pads[0] != NULL && claims(pads[0])) {
+        claimed[0] = true;
+        return;
+    }
+    for (uint32_t port = 1u; port < RECOMP_INPUT_PORT_COUNT; ++port) {
+        if (pads[port] == NULL || !claims(pads[port])) continue;
+        SDL_Gamepad *other = pads[0];
+        pads[0] = pads[port];
+        pads[port] = other;
+        claimed[0] = true;
+        claimed[port] = false;
+        fprintf(stderr, "recomp input: gamepad '%s' claimed port=0 from port=%u\n",
+            SDL_GetGamepadName(pads[0]), (unsigned)port);
+        return;
+    }
+}
+
 /* SDL starts lazily on the guest thread that polls it. There is no SDL event
    loop; SDL_UpdateGamepads pumps it. New gamepads take the lowest free ports
-   in opens_first order and keep them until they disconnect. */
+   in opens_first order and keep them until they disconnect or one claims
+   port 0 (claim_port0). */
 static void update_pads(void)
 {
     static bool initialized;
@@ -283,6 +321,7 @@ static void update_pads(void)
         if (pads[port] != NULL && !SDL_GamepadConnected(pads[port])) {
             SDL_CloseGamepad(pads[port]);
             pads[port] = NULL;
+            claimed[port] = false;
         }
     }
     int count = 0;
@@ -315,6 +354,7 @@ static void update_pads(void)
         }
     }
     SDL_free(ids);
+    claim_port0();
 }
 
 void recomp_input_host_set_vibration(
