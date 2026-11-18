@@ -608,6 +608,13 @@ void pumpEvents(RecompD3dPresenter *presenter)
                 SDL_SetWindowFullscreen(presenter->window, (SDL_GetWindowFlags(presenter->window) & SDL_WINDOW_FULLSCREEN) == 0);
             continue;
         }
+        // Alt+F4 closes the game as the window's close does. Desktop window
+        // managers take it first; gamescope (Steam's Gaming Mode) passes it on.
+        if (event.type == SDL_EVENT_KEY_DOWN && event.key.key == SDLK_F4 &&
+                (event.key.mod & SDL_KMOD_ALT) != 0) {
+            presenter->close_requested = true;
+            continue;
+        }
         if (event.type == SDL_EVENT_KEY_DOWN || event.type == SDL_EVENT_KEY_UP) {
             const uint32_t key = virtualKey(event.key.scancode);
             const bool down = event.type == SDL_EVENT_KEY_DOWN;
