@@ -78,6 +78,7 @@ default), this install's random player ID and the players it blocked.
 | `RECOMP_AUDIO_DUMP` | macOS and Linux: as `RECOMP_AUDIO_CAPTURE`, but overwrites. |
 | `RECOMP_AUDIO_TRACE` | Logs DirectSound calls, including 3D position updates. |
 | `RECOMP_INPUT_TRACE` | Logs host controller input. |
+| `RECOMP_INPUT_BUILTIN_LAST` | New controllers take ports in Steam's player order, with the Steam Deck's own controls after any other controller, so a docked Deck's external pad is player 1. `0` keeps the Deck's controls in Steam's order. |
 
 ## Investigation traces
 

@@ -233,9 +233,37 @@ static bool types_text(int key)
 #endif
 }
 
+/* The Steam Deck's own controls, natively or through Steam Input, which
+   names the virtual pad after the device. */
+static bool builtin_deck(SDL_JoystickID id)
+{
+    const char *name = SDL_GetGamepadNameForID(id);
+    return (SDL_GetGamepadVendorForID(id) == 0x28deu && SDL_GetGamepadProductForID(id) == 0x1205u) ||
+        (name != NULL && strstr(name, "Steam Deck") != NULL);
+}
+
+/* Which of two new gamepads takes the lower port: Steam's player order, then,
+   unless RECOMP_INPUT_BUILTIN_LAST=0, any controller before the Deck's own,
+   so a docked Deck's external pad is player 1. SDL's order breaks ties. */
+static bool opens_first(SDL_JoystickID a, SDL_JoystickID b)
+{
+    static int builtin_last = -1;
+    if (builtin_last < 0) {
+        const char *value = getenv("RECOMP_INPUT_BUILTIN_LAST");
+        builtin_last = value == NULL || strcmp(value, "0") != 0;
+    }
+    if (builtin_last) {
+        const bool deck_a = builtin_deck(a), deck_b = builtin_deck(b);
+        if (deck_a != deck_b) return deck_b;
+    }
+    const int index_a = SDL_GetGamepadPlayerIndexForID(a), index_b = SDL_GetGamepadPlayerIndexForID(b);
+    if (index_a >= 0 && index_b >= 0 && index_a != index_b) return index_a < index_b;
+    return false;
+}
+
 /* SDL starts lazily on the guest thread that polls it. There is no SDL event
-   loop; SDL_UpdateGamepads pumps it. A new gamepad takes the lowest free port
-   and keeps it until it disconnects. */
+   loop; SDL_UpdateGamepads pumps it. New gamepads take the lowest free ports
+   in opens_first order and keep them until they disconnect. */
 static void update_pads(void)
 {
     static bool initialized;
@@ -259,6 +287,15 @@ static void update_pads(void)
     }
     int count = 0;
     SDL_JoystickID *ids = SDL_GetGamepads(&count);
+    for (int i = 1; ids != NULL && i < count; ++i) {  /* stable insertion sort */
+        const SDL_JoystickID id = ids[i];
+        int j = i;
+        while (j > 0 && opens_first(id, ids[j - 1])) {
+            ids[j] = ids[j - 1];
+            --j;
+        }
+        ids[j] = id;
+    }
     for (int i = 0; ids != NULL && i < count; ++i) {
         uint32_t free_port = RECOMP_INPUT_PORT_COUNT;
         bool open = false;

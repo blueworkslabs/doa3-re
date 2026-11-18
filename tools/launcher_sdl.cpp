@@ -30,18 +30,20 @@ const int kHeights[] = {480, 720, 1080, 1440, 2160};
 const int kSamples[] = {1, 2, 4, 8};
 const char *const kScreens[] = {"4:3", "16:9", "16:10", "ULTRAWIDE"};
 const int kVolumes[] = {100, 75, 50, 25, 0};
+const int kAnisotropy[] = {1, 2, 4, 8, 16};
+const char *const kMovieFits[] = {"FILL", "ORIGINAL"};
 
 // Tab names are short: all eight must fit the 640-pixel canvas.
 // Every item before CHOOSE_ISO is a setting with choices; the rest are buttons, so they come last and have no choice count.
 enum Item { RESOLUTION, MSAA, VOLUME, WIDESCREEN, FREE_CAMERA, SWIMSUITS, START_FAVORITE, CHECK_UPDATES, MOVIES,
-            CHOOSE_ISO, CHOOSE_FOLDER, BUILD, UPDATE, ITEM_COUNT };
+            ANISOTROPY, MOVIE_FIT, CHOOSE_ISO, CHOOSE_FOLDER, BUILD, UPDATE, ITEM_COUNT };
 const char *kLabels[] = {"RESOLUTION", "MSAA", "VOLUME", "SCREEN", "FREE CAMERA", "SWIMSUITS", "START IN FAVORITE", "CHECK AT START",
-                         "MOVIES", "DISC ISO", "DISC FOLDER", "BUILD", "UPDATE"};
+                         "MOVIES", "FILTER", "MOVIE FIT", "DISC ISO", "DISC FOLDER", "BUILD", "UPDATE"};
 static_assert(std::size(kLabels) == ITEM_COUNT, "kLabels needs one label per Item");
 
 struct Page { const char *name, *info; std::vector<int> rows; };
 const Page kPages[] = {
-    {"VIDEO", "Sets resolution, anti-aliasing and screen shape", {RESOLUTION, MSAA, WIDESCREEN}},
+    {"VIDEO", "Sets resolution, anti-aliasing, screen shape and texture filtering", {RESOLUTION, MSAA, WIDESCREEN, ANISOTROPY, MOVIE_FIT}},
     {"AUDIO", "Sets the master volume", {VOLUME}},
     {"FREE CAMERA", "In game, F1 or a right-stick click flies the camera; P freezes", {FREE_CAMERA}},
     {"SWIMSUITS", "DOAXBV swimsuits; needs your own DOAXBV disc: an .iso in private/ or doaxbv-path.txt", {SWIMSUITS, START_FAVORITE}},
@@ -64,6 +66,8 @@ struct Settings {
     bool start_favorite = false;
     bool check_updates = true; // look for a newer release when the launcher opens
     bool movies = true;        // the build installs the disc's movies (3.4 GB)
+    int anisotropy = 1;        // RECOMP_D3D_ANISO
+    std::string movie_fit = "fill"; // RECOMP_MOVIE_FIT: fill the width or keep the 4:3 frame
 };
 
 struct Color { Uint8 r, g, b; };
@@ -101,6 +105,8 @@ Settings loadSettings(const std::string &path)
     if (jsonValue(text, "swimsuit_start_favorite", value)) settings.start_favorite = value == "true";
     if (jsonValue(text, "check_updates", value)) settings.check_updates = value != "false";
     if (jsonValue(text, "movies", value)) settings.movies = value != "false";
+    if (jsonValue(text, "anisotropy", value)) settings.anisotropy = std::atoi(value.c_str());
+    if (jsonValue(text, "movie_fit", value) && value == "\"original\"") settings.movie_fit = "original";
     return settings;
 }
 
@@ -114,6 +120,8 @@ bool saveSettings(const std::string &path, const Settings &settings)
          << ",\n  \"swimsuits\": " << (settings.swimsuits ? "true" : "false")
          << ",\n  \"swimsuit_start_favorite\": " << (settings.start_favorite ? "true" : "false")
          << ",\n  \"movies\": " << (settings.movies ? "true" : "false")
+         << ",\n  \"anisotropy\": " << settings.anisotropy
+         << ",\n  \"movie_fit\": \"" << settings.movie_fit << '"'
          << ",\n  \"check_updates\": " << (settings.check_updates ? "true" : "false") << "\n}\n";
     return static_cast<bool>(file);
 }
@@ -186,6 +194,8 @@ struct Launcher {
         case MSAA: return kSamples[choice[item]] == 1 ? "OFF" : std::to_string(kSamples[choice[item]]) + "X";
         case VOLUME: return kVolumes[choice[item]] == 0 ? "MUTE" : std::to_string(kVolumes[choice[item]]) + "%";
         case WIDESCREEN: return kScreens[choice[item]];
+        case ANISOTROPY: return kAnisotropy[choice[item]] == 1 ? "OFF" : std::to_string(kAnisotropy[choice[item]]) + "X";
+        case MOVIE_FIT: return kMovieFits[choice[item]];
         case CHOOSE_ISO:
         case CHOOSE_FOLDER: return "CHOOSE";
         case BUILD: return build != nullptr ? "WORKING" : "BUILD";
@@ -198,7 +208,8 @@ struct Launcher {
     {
         static const int counts[] = {static_cast<int>(std::size(kHeights)),
             static_cast<int>(std::size(kSamples)), static_cast<int>(std::size(kVolumes)),
-            static_cast<int>(std::size(kScreens)), 2, 2, 2, 2, 2};
+            static_cast<int>(std::size(kScreens)), 2, 2, 2, 2, 2,
+            static_cast<int>(std::size(kAnisotropy)), static_cast<int>(std::size(kMovieFits))};
         static_assert(std::size(counts) == CHOOSE_ISO, "counts needs one count per setting");
         if (item >= CHOOSE_ISO) return; // a button has no choices for up and down to step through
         choice[item] = (choice[item] + counts[item] + step) % counts[item];
@@ -654,6 +665,8 @@ int main(int argc, char **argv)
     launcher.choice[START_FAVORITE] = settings.start_favorite ? 1 : 0;
     launcher.choice[CHECK_UPDATES] = settings.check_updates ? 1 : 0;
     launcher.choice[MOVIES] = settings.movies ? 1 : 0;
+    launcher.choice[ANISOTROPY] = indexOf(kAnisotropy, settings.anisotropy, 0);
+    launcher.choice[MOVIE_FIT] = settings.movie_fit == "original" ? 1 : 0;
     launcher.info[kBuildPage] = launcher.buildStatus();
     launcher.menu = launcher.built() ? kPlayPage : kBuildPage;
     if (settings.check_updates) launcher.startUpdate(true);
@@ -782,6 +795,8 @@ int main(int argc, char **argv)
         settings.start_favorite = launcher.choice[START_FAVORITE] != 0;
         settings.check_updates = launcher.choice[CHECK_UPDATES] != 0;
         settings.movies = launcher.choice[MOVIES] != 0;
+        settings.anisotropy = kAnisotropy[launcher.choice[ANISOTROPY]];
+        settings.movie_fit = launcher.choice[MOVIE_FIT] ? "original" : "fill";
         if (result != 0 && launcher.choice[WIDESCREEN] == shown_screen) settings.screen = loaded.screen;
         if (!saveSettings(settings_path, settings)) {
             std::fprintf(stderr, "launcher: cannot write %s\n", settings_path.c_str());
