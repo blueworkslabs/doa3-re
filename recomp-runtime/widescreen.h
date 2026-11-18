@@ -98,4 +98,45 @@ static inline RecompWidescreen2dScale recomp_widescreen_2d_scale(float width, fl
     return scale;
 }
 
+/* At 16:9 the game pre-squeezes a few 2D quads for a television that
+   stretches the whole picture: the character select's face tiles keep their
+   size and place but sample 4/3 as many texels across (80 for 60 pixels).
+   The 2D layer stays 4:3 here, so that squeeze would apply twice. For a
+   screen-space quad whose texels per pixel are 4/3 across and 1 down, narrow
+   its U span by 3/4 about its centre, back to what 4:3 samples. vertices is
+   the presenter's own copy; true if it changed them. */
+static inline bool recomp_widescreen_unsqueeze_quad(unsigned char *vertices, unsigned stride,
+    unsigned count, unsigned uv_offset, float texture_w, float texture_h)
+{
+    float x0 = INFINITY, x1 = -INFINITY, y0 = INFINITY, y1 = -INFINITY;
+    float u0 = INFINITY, u1 = -INFINITY, v0 = INFINITY, v1 = -INFINITY;
+    unsigned i;
+
+    if (count != 4u || texture_w <= 0.0f || texture_h <= 0.0f || uv_offset + 8u > stride) return false;
+    for (i = 0u; i < count; ++i) {
+        float xy[2], uv[2];
+        memcpy(xy, vertices + i * stride, sizeof xy);
+        memcpy(uv, vertices + i * stride + uv_offset, sizeof uv);
+        x0 = fminf(x0, xy[0]); x1 = fmaxf(x1, xy[0]);
+        y0 = fminf(y0, xy[1]); y1 = fmaxf(y1, xy[1]);
+        u0 = fminf(u0, uv[0]); u1 = fmaxf(u1, uv[0]);
+        v0 = fminf(v0, uv[1]); v1 = fmaxf(v1, uv[1]);
+    }
+    if (!(x1 - x0 >= 8.0f) || !(y1 - y0 >= 8.0f) ||
+        fabsf((u1 - u0) * texture_w - (x1 - x0) * 4.0f / 3.0f) > 0.5f ||
+        fabsf((v1 - v0) * texture_h - (y1 - y0)) > 0.5f) {
+        return false;
+    }
+    {
+        const float centre = 0.5f * (u0 + u1);
+        for (i = 0u; i < count; ++i) {
+            float u;
+            memcpy(&u, vertices + i * stride + uv_offset, sizeof u);
+            u = centre + (u - centre) * 0.75f;
+            memcpy(vertices + i * stride + uv_offset, &u, sizeof u);
+        }
+    }
+    return true;
+}
+
 #endif

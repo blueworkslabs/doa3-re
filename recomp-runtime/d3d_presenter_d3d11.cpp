@@ -2962,9 +2962,33 @@ RecompD3dPresenterError submitDraw(
 
     const UINT vertex_size = draw.vertex_stride * draw.vertex_count;
     UINT vertex_offset = 0u;
+    /* A face tile the game pre-squeezed for widescreen samples its 4:3 span
+       again (widescreen.h); the quad keeps its place in the 4:3 2D layer. */
+    const void *vertex_source = draw.vertex_bytes;
+    std::vector<unsigned char> unsqueezed;
+    if (presenter->widescreen && layout.pretransformed && !draw.program_count &&
+        !draw.target.offscreen && draw.has_texture && draw.vertex_count == 4u &&
+        layout.texcoord_offset != RECOMP_D3D_FVF_ABSENT) {
+        float left = INFINITY, right = -INFINITY;
+        for (uint32_t i = 0u; i < draw.vertex_count; ++i) {
+            float x;
+            std::memcpy(&x, static_cast<const uint8_t *>(draw.vertex_bytes) + i * draw.vertex_stride, sizeof x);
+            left = (std::min)(left, x);
+            right = (std::max)(right, x);
+        }
+        if (recomp_squeeze_widescreen_2d(left, right, static_cast<float>(presenter->config.width))) {
+            const auto *bytes = static_cast<const unsigned char *>(draw.vertex_bytes);
+            unsqueezed.assign(bytes, bytes + vertex_size);
+            if (recomp_widescreen_unsqueeze_quad(unsqueezed.data(), draw.vertex_stride, draw.vertex_count,
+                    layout.texcoord_offset, static_cast<float>(draw.texture.width),
+                    static_cast<float>(draw.texture.height))) {
+                vertex_source = unsqueezed.data();
+            }
+        }
+    }
     if (!uploadRing(presenter, &presenter->draw_vertex_buffer,
             presenter->draw_vertex_capacity, presenter->draw_vertex_used,
-            draw.vertex_bytes, vertex_size, D3D11_BIND_VERTEX_BUFFER, vertex_offset)) {
+            vertex_source, vertex_size, D3D11_BIND_VERTEX_BUFFER, vertex_offset)) {
         return RECOMP_D3D_PRESENTER_HOST_FAILURE;
     }
 
